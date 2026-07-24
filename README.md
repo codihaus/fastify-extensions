@@ -211,6 +211,19 @@ npm install @codihaus/fastify-extensions
 `fastify` is an optional peer dependency. Install Fastify when you use endpoint extensions
 or the plugin wrapper. Hook-, emitter-, and scheduling-only hosts do not need its runtime.
 
+## Runnable feature lab
+
+The [consumer app](./examples/consumer-app) installs the published npm package and exercises
+discovery, host enablement, required extensions, two-phase loading, filters, actions, bundles,
+the service registry, schedules, and cleanup:
+
+```bash
+cd examples/consumer-app
+npm install
+npm test
+npm start
+```
+
 ## Agent guides
 
 The npm package ships with two integration guides:

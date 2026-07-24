@@ -1,14 +1,15 @@
 {
-  "name": "consumer-app",
+  "name": "@codihaus/fastify-extensions-consumer-example",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Sample host consuming @codihaus/fastify-extensions — three extension case studies",
+  "description": "Runnable feature lab for the published @codihaus/fastify-extensions package",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "test": "node test.mjs"
   },
   "dependencies": {
-    "@codihaus/fastify-extensions": "file:../..",
+    "@codihaus/fastify-extensions": "0.1.0",
     "fastify": "^5.2.0"
   }
 }

@@ -212,6 +212,19 @@ npm install @codihaus/fastify-extensions
 `fastify` là optional peer dependency. Hãy cài Fastify khi sử dụng endpoint extension hoặc
 plugin wrapper. Host chỉ dùng hook, emitter và scheduling không cần Fastify ở runtime.
 
+## Feature lab có thể chạy trực tiếp
+
+[Consumer app](./examples/consumer-app) cài package đã publish trên npm và kiểm thử discovery,
+host enablement, required extension, two-phase loading, filter, action, bundle, service
+registry, schedule và cleanup:
+
+```bash
+cd examples/consumer-app
+npm install
+npm test
+npm start
+```
+
 ## Bắt đầu với two-phase manager
 
 Sử dụng manager trực tiếp khi extension cần quan sát event trước khi toàn bộ host route và
