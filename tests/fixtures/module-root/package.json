@@ -1,0 +1,12 @@
+{
+  "name": "module-host",
+  "version": "1.0.0",
+  "dependencies": {
+    "mod-ext": "1.0.0",
+    "not-ext": "1.0.0",
+    "hook-basic-mod": "1.0.0"
+  },
+  "devDependencies": {
+    "dev-ext": "1.0.0"
+  }
+}

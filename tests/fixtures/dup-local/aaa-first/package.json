@@ -1,0 +1,9 @@
+{
+  "name": "aaa-first",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "test-extension": {
+    "id": "dup-ext"
+  }
+}

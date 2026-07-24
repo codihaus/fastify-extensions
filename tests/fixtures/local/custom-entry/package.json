@@ -1,0 +1,8 @@
+{
+  "name": "custom-entry",
+  "version": "1.0.0",
+  "type": "module",
+  "test-extension": {
+    "path": "lib/custom.js"
+  }
+}

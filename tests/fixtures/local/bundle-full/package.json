@@ -1,0 +1,13 @@
+{
+  "name": "bundle-full",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "test-extension": {
+    "entries": [
+      { "type": "hook", "name": "audit" },
+      { "type": "endpoint", "name": "billing" },
+      { "type": "endpoint", "name": "extra" }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "store",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.mjs",
+  "consumer-extension": {
+    "type": "endpoint"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "audit",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.mjs",
+  "consumer-extension": {
+    "entries": [
+      { "type": "hook", "name": "trail" },
+      { "type": "endpoint", "name": "audit" },
+      { "type": "endpoint", "name": "health" }
+    ]
+  }
+}
