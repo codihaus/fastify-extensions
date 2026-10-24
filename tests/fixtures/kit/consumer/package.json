@@ -1,0 +1,9 @@
+{
+  "name": "consumer",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "kit-extension": {
+    "entries": [{ "type": "endpoint", "name": "consumer" }]
+  }
+}

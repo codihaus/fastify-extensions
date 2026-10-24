@@ -5,4 +5,6 @@ dist
 # Test fixtures ship a fake node_modules layout for module-discovery tests — keep it.
 !/tests/fixtures/module-root/node_modules
 !/tests/fixtures/module-root/node_modules/**
+!/tests/fixtures/module-strict/node_modules
+!/tests/fixtures/module-strict/node_modules/**
 tmp

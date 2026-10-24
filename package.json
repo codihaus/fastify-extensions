@@ -20,7 +20,8 @@
   "files": [
     "dist",
     "AGENTS.md",
-    "CLAUDE.md"
+    "CLAUDE.md",
+    "skills"
   ],
   "scripts": {
     "build": "NODE_ENV=production tsdown",
@@ -31,20 +32,32 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "cron": "^4.1.0"
+    "@fastify/view": "^12.0.1",
+    "cron": "^4.1.0",
+    "liquidjs": "^10.30.0"
   },
   "peerDependencies": {
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "pug": "^3.0.0",
+    "twig": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "fastify": {
+      "optional": true
+    },
+    "pug": {
+      "optional": true
+    },
+    "twig": {
       "optional": true
     }
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "fastify": "^5.2.0",
+    "pug": "^3.0.4",
     "tsdown": "^0.22.12",
+    "twig": "^3.0.0",
     "typescript": "^5.8.0",
     "unrun": "^0.3.1",
     "vitest": "^3.2.0"

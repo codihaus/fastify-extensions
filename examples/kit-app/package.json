@@ -1,0 +1,21 @@
+{
+  "name": "@codihaus/fastify-extensions-kit-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "One-call app kit (ServerExtension.start) in TypeScript, with TypeScript extensions",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "test": "tsx src/test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codihaus/fastify-extensions": "file:../..",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}

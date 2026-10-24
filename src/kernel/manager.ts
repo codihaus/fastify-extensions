@@ -6,11 +6,11 @@ import type {
 	LoadedExtension,
 	ScheduleLock,
 	ServiceRegistry,
-} from './types.js';
-import { Emitter } from './emitter.js';
+} from '../types.js';
+import { Emitter } from '../runtime/emitter.js';
 import { ServiceRegistryImpl } from './registry.js';
-import { MemoryScheduleLock } from './schedule.js';
-import { createConsoleLogger } from './logger.js';
+import { MemoryScheduleLock } from '../runtime/schedule.js';
+import { createConsoleLogger } from '../runtime/logger.js';
 import {
 	scanLocalExtensions,
 	scanModuleExtensions,
@@ -112,6 +112,7 @@ export class ExtensionManager<TContext> {
 	private readonly loadedExtensions = new Map<string, LoadedExtension>();
 	private readonly pendingExtensions = new Map<string, PendingExtension<TContext>>();
 	private phase: ManagerPhase = 'idle';
+	private servicesRegistered = false;
 
 	constructor(options: ExtensionManagerOptions<TContext>) {
 		if (!options.manifestKey) {
@@ -131,6 +132,12 @@ export class ExtensionManager<TContext> {
 		this.createContext = options.createContext;
 
 		this.ownsEmitter = options.emitter === undefined;
+		if (!this.ownsEmitter && options.scheduleLock) {
+			this.logger.warn(
+				{},
+				'"scheduleLock" is ignored when "emitter" is injected — pass the lock to the injected Emitter instead',
+			);
+		}
 		this.emitterInstance =
 			options.emitter ??
 			new Emitter({ logger: this.logger, scheduleLock: options.scheduleLock ?? new MemoryScheduleLock() });
@@ -236,6 +243,40 @@ export class ExtensionManager<TContext> {
 	}
 
 	/**
+	 * Optional Phase 1.5 — emit `extensions.register` and seal the registry BEFORE
+	 * Phase 2. Call it between {@link scanAndLoadHooks} and {@link loadEndpoints} when
+	 * the host emits its own init events (e.g. `app.before`, `routes.before`) and
+	 * extensions must be able to consume services inside them, or inside endpoint
+	 * setup functions. This mirrors the ODP core boot order.
+	 *
+	 * When skipped, {@link loadEndpoints} emits the register event after mounting
+	 * endpoints (the original behaviour). One-shot per cycle; an init handler error
+	 * propagates, but the registry is still sealed so init side effects never re-fire.
+	 */
+	async registerServices(): Promise<void> {
+		if (this.phase !== 'hooks-loaded') {
+			throw new Error(
+				`registerServices() called in phase "${this.phase}" — it must run after scanAndLoadHooks() and before loadEndpoints().`,
+			);
+		}
+		if (this.servicesRegistered) {
+			throw new Error('registerServices() already ran — call reset() before registering again.');
+		}
+
+		this.servicesRegistered = true;
+		try {
+			await this.emitterInstance.emitInit(REGISTER_EVENT);
+		} finally {
+			this.registryInstance.seal();
+		}
+	}
+
+	/** Whether the `extensions.register` event already ran and the registry is sealed. */
+	get registrySealed(): boolean {
+		return this.registryInstance.sealed;
+	}
+
+	/**
 	 * Phase 2 — mount endpoint extensions, emit the register event, seal the registry.
 	 *
 	 * One-shot: requires Phase 1 to have run and may not run twice; retrying after a
@@ -248,6 +289,8 @@ export class ExtensionManager<TContext> {
 	 * cleanups run and it is discarded (error logged, other extensions continue).
 	 * Routes it mounted before throwing cannot be removed from Fastify — a partial
 	 * mount is possible and is logged as such.
+	 *
+	 * If {@link registerServices} already ran, the register event is not emitted again.
 	 */
 	async loadEndpoints(app: FastifyInstance): Promise<void> {
 		if (this.phase === 'idle') {
@@ -286,6 +329,12 @@ export class ExtensionManager<TContext> {
 
 		this.pendingExtensions.clear();
 
+		if (this.servicesRegistered) {
+			this.phase = 'ready';
+			return;
+		}
+
+		this.servicesRegistered = true;
 		try {
 			await this.emitterInstance.emitInit(REGISTER_EVENT);
 		} finally {
@@ -336,6 +385,7 @@ export class ExtensionManager<TContext> {
 		this.loadedExtensions.clear();
 		this.pendingExtensions.clear();
 		this.registryInstance.reset();
+		this.servicesRegistered = false;
 
 		if (this.ownsEmitter) {
 			await this.emitterInstance.stopAllSchedules();

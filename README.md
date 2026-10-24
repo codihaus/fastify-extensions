@@ -232,6 +232,130 @@ The npm package ships with two integration guides:
   extension authoring.
 - [CLAUDE.md](./CLAUDE.md) gives Claude a shorter execution guide with lifecycle invariants,
   diagnostics, and validation checklists.
+- [skills/fastify-extensions](./skills/fastify-extensions/SKILL.md) is a Claude Code skill for
+  consumer projects (hosts and extension authors). Copy or symlink it into
+  `~/.claude/skills/` or the project's `.claude/skills/`:
+  `ln -s "$PWD/node_modules/@codihaus/fastify-extensions/skills/fastify-extensions" .claude/skills/`
+
+## Three ways to boot
+
+| Mode | API | Use it when |
+|---|---|---|
+| Kit | `ServerExtension.start(options)` | You want a full app in one call: Fastify, extensions, health probes, request ids, error handling, graceful shutdown. |
+| Manual | `ExtensionManager` + your own Fastify | You already own the server bootstrap and need exact control over every step. |
+| Plugin | `app.register(fastifyExtensions, options)` | You only need extensions mounted into an existing app, with no host events between the phases. |
+
+All three share the same extension contract. An extension written for one mode runs
+unchanged in the others.
+
+## One call: the app kit
+
+```ts
+import { ServerExtension } from '@codihaus/fastify-extensions';
+
+await ServerExtension.start({
+  name: 'orders',
+  port: 3000,
+  host: '0.0.0.0',
+  extensions: { manifestKey: 'orders-extension', extensionsPath: './extensions' },
+  context: (base) => ({ ...base, db }),
+  services: (registry) => registry.provide(dbRef, db),
+  plugins: [[import('@fastify/cors'), { origin: true }]],
+  middlewares: (app) => app.addHook('preHandler', authenticate),
+  routes: (app) => app.get('/', async () => ({ ok: true })),
+  health: { checks: { db: () => db.ping() } },
+  onClose: () => db.destroy(),
+});
+```
+
+Only what you pass is required. `ServerExtension.start({ port: 3000 })` is a valid app.
+
+The kit follows the ODP core boot order. Extensions can consume services in every init
+event, because the registry seals before the first one fires:
+
+1. Create Fastify (kit defaults + `options.fastify`), add health and request-id hooks.
+2. Phase 1: discover extensions and register their hooks.
+3. `options.services`, then init `extensions.register`. The registry seals.
+4. Init `app.before` → `options.plugins` → init `middlewares.before` → `options.middlewares` → init `middlewares.after`.
+5. Init `routes.before` → `options.routes` → extension endpoints → init `routes.after`.
+6. Init `app.after` → `app.ready()` → `options.onReady`.
+7. `start()` only: listen → action `server.start`. SIGINT/SIGTERM start a graceful close.
+
+Close runs on `kit.close()`, on a signal, or on `kit.app.close()`. The order is: action
+`server.stop` → Fastify drains in-flight requests → shutdown hooks by phase (`workers` →
+`schedules` → `connections`). Extension cleanup and cron jobs stop in `schedules`. `onClose`
+runs in `connections`. A hook that throws or exceeds `shutdownTimeoutMs` is logged and skipped.
+
+Defaults, each one can be turned off:
+
+| Option | Default |
+|---|---|
+| `health` | `GET /health`, `/health/live`, `/health/ready` answered before any host hook. `/ready` runs `checks` with a timeout and returns 503 on failure or during shutdown. |
+| `requestId` | A safe `x-request-id` header becomes the request id, else a UUID. The id is echoed on every reply. |
+| `acceptEmptyJson` | An empty `application/json` body parses as `undefined` instead of failing. |
+| `errorHandler` | Fastify-shaped error body. 5xx messages are hidden and logged. |
+| `notFoundHandler` | `ROUTE_NOT_FOUND` without the query string. |
+| `fastify.logger` | `{ level: 'info' }`, unless you set `logger` or `loggerInstance`. |
+| `host` | `127.0.0.1`. Set `0.0.0.0` in containers. |
+| `view` | Liquid via `@fastify/view`, templates in `<cwd>/views`, HTML auto-escaped. |
+
+### Templates: Liquid by default, Pug or Twig on demand
+
+The kit registers `@fastify/view` at the root, so `reply.view()` works in host routes and in
+extension endpoints. Pick the engine once, at init:
+
+```ts
+await ServerExtension.start({
+  view: { engine: 'liquid', root: './views', defaultContext: { site: 'Acme' },
+          setup: (liquid) => liquid.registerFilter('money', (v) => v.toFixed(2)) },
+  routes: (app) => app.get('/', (request, reply) => reply.view('home', { name: 'Ada' })),
+});
+// view: { engine: 'pug' }   -> npm install pug
+// view: { engine: 'twig' }  -> npm install twig
+// view: false               -> no template engine
+```
+
+| Engine | Package | Why |
+|---|---|---|
+| `liquid` (default) | `liquidjs`, bundled | Templates cannot run arbitrary JS, so they are safe to hand to non-developers or store in a database. Pure JS, async, maintained. |
+| `pug` | `pug`, optional peer | Compact syntax for developer-owned templates. Compiles to JS. |
+| `twig` | `twig`, optional peer | Familiar to teams coming from PHP/Symfony. |
+
+Output is HTML-escaped by default on every engine. Mark trusted HTML with `| raw` (Liquid,
+Twig) or `!{}` (Pug). `reply.view('home')` renders `home.<engine extension>`. Templates are
+cached when `production` is true (default: `NODE_ENV === 'production'`).
+
+Extensions receive this context when you do not pass `context`:
+
+```ts
+interface AppKitBaseContext {
+  extensionId: string;
+  appName: string;
+  config: ExtensionConfig;
+  logger: ExtensionLoggerLike;           // child logger { extension: id }
+  emitter: Emitter;
+  registry: ServiceRegistry;
+  onShutdown(phase, name, run): () => void;
+}
+```
+
+Use `ServerExtension.create(options)` in tests. It builds the same app without a TCP port:
+
+```ts
+const kit = await ServerExtension.create({ ...options, fastify: { logger: false } });
+const response = await kit.app.inject({ method: 'GET', url: '/health/ready' });
+await kit.close();
+```
+
+The [kit app](./examples/kit-app) is a TypeScript app with TypeScript extensions (a hook and
+an endpoint sharing a typed contract). `src/app.ts` is its whole bootstrap; compare it with the
+manual bootstrap in `examples/consumer-app/app.mjs`. It installs this repository through
+`file:../..` and runs `.ts` extension entries with `tsx`, so build the root first:
+
+```bash
+npm run build
+cd examples/kit-app && npm install && npm run typecheck && npm test
+```
 
 ## Start with the two-phase manager
 
@@ -267,6 +391,10 @@ await extensions.scanAndLoadHooks();
 
 // Build the host itself. Extensions can already observe events emitted here.
 app.get('/health', async () => ({ ok: true }));
+
+// Optional: emit extensions.register and seal the registry now, so extensions can
+// consume services in host init events emitted before Phase 2.
+// await extensions.registerServices();
 
 // Phase 2: mount extension endpoints and seal the service registry.
 await extensions.loadEndpoints(app);
@@ -534,6 +662,7 @@ and useful for: **trusted, server-side extension ecosystems with controlled star
 
 ```ts
 import {
+  ServerExtension,
   ExtensionManager,
   Emitter,
   ServiceRegistryImpl,

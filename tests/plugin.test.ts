@@ -130,3 +130,57 @@ describe('fastifyExtensions plugin', () => {
 		expect(app.extensions.getExtensions()).toEqual([]);
 	});
 });
+
+describe('fastifyExtensions plugin — review 2026-10-24', () => {
+	const shapeFixtures = join(currentDir, 'fixtures/shapes');
+
+	it('I — resets the manager when boot fails, so started schedules do not leak', async () => {
+		const released: string[] = [];
+		const app = fastify();
+
+		await expect(
+			fastifyExtensions(app, {
+				manifestKey: 'test-extension',
+				extensionsPath: shapeFixtures,
+				moduleRoot: false,
+				logger: createFakeLogger(),
+				isEnabled: (id) => id === 'dup-cron',
+				mustLoad: ['missing-extension'],
+				scheduleLock: {
+					claim: async () => true,
+					release: async (name) => {
+						released.push(name);
+					},
+				},
+				createContext: makeCreateContext(),
+			}),
+		).rejects.toThrow('Required extension "missing-extension" failed to load');
+
+		expect(released).toHaveLength(3);
+		await app.close();
+	});
+
+	it('H — a second direct registration keeps the first decorator and warns instead of throwing', async () => {
+		const warnings: string[] = [];
+		const logger: ExtensionLoggerLike = { ...createFakeLogger(), warn: (_obj, msg) => void warnings.push(String(msg)) };
+		const app = fastify();
+		const managers: ExtensionManager<TestContext>[] = [];
+		const options = {
+			manifestKey: 'test-extension',
+			extensionsPath: localFixtures,
+			moduleRoot: false as const,
+			logger,
+			isEnabled: (id: string) => id === 'hook-basic',
+			createContext: makeCreateContext(),
+			onManager: (manager: ExtensionManager<TestContext>) => void managers.push(manager),
+		};
+
+		await fastifyExtensions(app, options);
+		await fastifyExtensions(app, options);
+
+		expect(managers).toHaveLength(2);
+		expect(app.extensions).toBe(managers[0]);
+		expect(warnings.some((message) => message.includes('already decorated'))).toBe(true);
+		await app.close();
+	});
+});

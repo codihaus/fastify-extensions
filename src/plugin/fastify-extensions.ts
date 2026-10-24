@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { ExtensionManager, type ExtensionManagerOptions } from './manager.js';
+import { ExtensionManager, type ExtensionManagerOptions } from '../kernel/manager.js';
 
 declare module 'fastify' {
 	interface FastifyInstance {
@@ -61,10 +61,26 @@ export async function fastifyExtensions<TContext>(
 	const { onManager, ...managerOptions } = options;
 	const manager = new ExtensionManager<TContext>(managerOptions);
 
-	await manager.scanAndLoadHooks();
-	await manager.loadEndpoints(app);
+	try {
+		await manager.scanAndLoadHooks();
+		await manager.loadEndpoints(app);
+	} catch (error) {
+		// A failed boot (e.g. a missing mustLoad extension) must not leave hooks and
+		// cron jobs running — they would keep the process alive.
+		await manager.reset();
+		throw error;
+	}
 
-	app.decorate('extensions', manager as ExtensionManager<unknown>);
+	if (app.hasDecorator('extensions')) {
+		// A second registration on the same scope: keep the first decorator, hand this
+		// manager out through onManager only.
+		(managerOptions.logger ?? app.log).warn(
+			{},
+			'"extensions" is already decorated on this instance — use onManager to reach this manager',
+		);
+	} else {
+		app.decorate('extensions', manager as ExtensionManager<unknown>);
+	}
 	app.addHook('onClose', async () => {
 		await manager.reset();
 	});

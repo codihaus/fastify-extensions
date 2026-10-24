@@ -225,6 +225,97 @@ npm test
 npm start
 ```
 
+## Ba cách khởi động
+
+| Mode | API | Dùng khi |
+|---|---|---|
+| Kit | `ServerExtension.start(options)` | Cần cả app trong 1 lệnh: Fastify, extension, health probe, request id, error handler, graceful shutdown. |
+| Manual | `ExtensionManager` + Fastify của host | Host đã có bootstrap riêng và cần kiểm soát từng bước. |
+| Plugin | `app.register(fastifyExtensions, options)` | Chỉ cần mount extension vào app có sẵn, không emit event giữa 2 phase. |
+
+Cả 3 mode dùng chung contract extension. Extension viết cho mode này chạy được ở mode khác, không sửa.
+
+## Một lệnh: app kit
+
+```ts
+import { ServerExtension } from '@codihaus/fastify-extensions';
+
+await ServerExtension.start({
+  name: 'orders',
+  port: 3000,
+  host: '0.0.0.0',
+  extensions: { manifestKey: 'orders-extension', extensionsPath: './extensions' },
+  context: (base) => ({ ...base, db }),
+  services: (registry) => registry.provide(dbRef, db),
+  plugins: [[import('@fastify/cors'), { origin: true }]],
+  middlewares: (app) => app.addHook('preHandler', authenticate),
+  routes: (app) => app.get('/', async () => ({ ok: true })),
+  health: { checks: { db: () => db.ping() } },
+  onClose: () => db.destroy(),
+});
+```
+
+Mọi option đều optional. `ServerExtension.start({ port: 3000 })` là một app hợp lệ.
+
+Kit chạy theo boot order của ODP core. Registry seal trước init event đầu tiên, nên extension consume service được trong mọi init event:
+
+1. Tạo Fastify (default của kit + `options.fastify`), gắn hook health và request id.
+2. Phase 1: discover extension, đăng ký hook.
+3. `options.services`, rồi init `extensions.register`. Registry seal.
+4. Init `app.before` → `options.plugins` → init `middlewares.before` → `options.middlewares` → init `middlewares.after`.
+5. Init `routes.before` → `options.routes` → endpoint của extension → init `routes.after`.
+6. Init `app.after` → `app.ready()` → `options.onReady`.
+7. Chỉ `start()`: listen → action `server.start`. SIGINT/SIGTERM kích hoạt graceful close.
+
+Close chạy khi gọi `kit.close()`, khi nhận signal, hoặc khi gọi `kit.app.close()`. Thứ tự: action `server.stop` → Fastify drain request đang chạy → shutdown hook theo phase (`workers` → `schedules` → `connections`). Cleanup extension và cron job dừng ở `schedules`. `onClose` chạy ở `connections`. Hook throw hoặc quá `shutdownTimeoutMs` bị log rồi bỏ qua.
+
+Default (tắt được từng cái):
+
+| Option | Default |
+|---|---|
+| `health` | `GET /health`, `/health/live`, `/health/ready` trả lời trước mọi hook của host. `/ready` chạy `checks` có timeout, trả 503 khi lỗi hoặc đang shutdown. |
+| `requestId` | Header `x-request-id` hợp lệ thành request id, nếu không thì UUID. Id được echo trên mọi reply. |
+| `acceptEmptyJson` | Body `application/json` rỗng parse thành `undefined`, không lỗi. |
+| `errorHandler` | Error body theo format Fastify. Message 5xx bị ẩn và ghi log. |
+| `notFoundHandler` | `ROUTE_NOT_FOUND`, không kèm query string. |
+| `fastify.logger` | `{ level: 'info' }`, trừ khi host set `logger` hoặc `loggerInstance`. |
+| `host` | `127.0.0.1`. Trong container set `0.0.0.0`. |
+| `view` | Liquid qua `@fastify/view`, template ở `<cwd>/views`, tự escape HTML. |
+
+### Template: mặc định Liquid, chọn Pug hoặc Twig khi init
+
+Kit đăng ký `@fastify/view` ở root, nên `reply.view()` dùng được trong route của host và endpoint của extension. Chọn engine 1 lần lúc init:
+
+```ts
+await ServerExtension.start({
+  view: { engine: 'liquid', root: './views', defaultContext: { site: 'Acme' },
+          setup: (liquid) => liquid.registerFilter('money', (v) => v.toFixed(2)) },
+  routes: (app) => app.get('/', (request, reply) => reply.view('home', { name: 'Ada' })),
+});
+// view: { engine: 'pug' }   -> npm install pug
+// view: { engine: 'twig' }  -> npm install twig
+// view: false               -> tắt template engine
+```
+
+| Engine | Package | Lý do |
+|---|---|---|
+| `liquid` (default) | `liquidjs`, đi kèm package | Template không chạy được JS tuỳ ý, nên giao cho non-dev hoặc lưu trong DB vẫn an toàn. Pure JS, async, còn maintain. |
+| `pug` | `pug`, optional peer | Cú pháp gọn cho template do dev viết. Compile ra JS. |
+| `twig` | `twig`, optional peer | Quen thuộc với team PHP/Symfony. |
+
+Mọi engine đều tự escape HTML. HTML tin cậy đánh dấu bằng `| raw` (Liquid, Twig) hoặc `!{}` (Pug). `reply.view('home')` render file `home.<extension của engine>`. Template được cache khi `production` là true (default: `NODE_ENV === 'production'`).
+
+Không truyền `context` thì extension nhận `AppKitBaseContext`: `extensionId`, `appName`, `config`, `logger` (child `{ extension: id }`), `emitter`, `registry`, `onShutdown(phase, name, run)`.
+
+Trong test dùng `ServerExtension.create(options)`: build cùng app, không mở port, gọi `kit.app.inject(...)`, xong `kit.close()`.
+
+[Kit app](./examples/kit-app) là app TypeScript với extension TypeScript (1 hook, 1 endpoint, dùng chung contract có type). `src/app.ts` là toàn bộ bootstrap; so sánh với bootstrap manual ở `examples/consumer-app/app.mjs`. Example cài package này qua `file:../..` và chạy entry `.ts` của extension bằng `tsx`, nên phải build root trước:
+
+```bash
+npm run build
+cd examples/kit-app && npm install && npm run typecheck && npm test
+```
+
 ## Bắt đầu với two-phase manager
 
 Sử dụng manager trực tiếp khi extension cần quan sát event trước khi toàn bộ host route và
@@ -259,6 +350,10 @@ await extensions.scanAndLoadHooks();
 
 // Dựng phần của host. Extension đã có thể quan sát event được phát tại đây.
 app.get('/health', async () => ({ ok: true }));
+
+// Optional: emit extensions.register và seal registry ngay, để extension consume
+// service được trong init event của host phát trước Phase 2.
+// await extensions.registerServices();
 
 // Phase 2: mount extension endpoint và seal service registry.
 await extensions.loadEndpoints(app);
@@ -527,6 +622,7 @@ startup được kiểm soát**.
 
 ```ts
 import {
+  ServerExtension,
   ExtensionManager,
   Emitter,
   ServiceRegistryImpl,

@@ -71,7 +71,10 @@ export interface HookContext<TEventContext = unknown> {
 	action(event: string, handler: ActionHandler<TEventContext>): void;
 	/** Subscribe to an init event (sequential, awaited). */
 	init(event: string, handler: InitHandler): void;
-	/** Register a cron schedule. The job name is namespaced as `ext:<extension-id>:<cron>`. */
+	/**
+	 * Register a cron schedule. The job name is namespaced as `ext:<extension-id>:<cron>`;
+	 * a repeated cron in the same extension gets a `#2`, `#3`, ... suffix.
+	 */
 	schedule(cron: string, handler: () => Promise<void>): void;
 }
 

@@ -1,4 +1,4 @@
-import type { ExtensionLoggerLike } from './types.js';
+import type { ExtensionLoggerLike } from '../types.js';
 
 /**
  * Console-backed fallback logger used when the host does not inject one.

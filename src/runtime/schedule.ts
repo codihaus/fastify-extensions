@@ -1,5 +1,5 @@
 import { CronJob, validateCronExpression } from 'cron';
-import type { ExtensionLoggerLike, ScheduleLock } from './types.js';
+import type { ExtensionLoggerLike, ScheduleLock } from '../types.js';
 
 /** Handle to a running scheduled job. */
 export interface ScheduledJob {

@@ -1,0 +1,9 @@
+{
+  "name": "module-strict-host",
+  "version": "1.0.0",
+  "dependencies": {
+    "strict-ext": "1.0.0",
+    "@acme/scoped-strict": "1.0.0",
+    "not-installed": "1.0.0"
+  }
+}

@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import type {
@@ -6,7 +6,7 @@ import type {
 	ExtensionEntry,
 	ExtensionLoggerLike,
 	ExtensionManifest,
-} from './types.js';
+} from '../types.js';
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -192,8 +192,13 @@ export async function scanModuleExtensions(
 	const dependencyNames = Object.keys(hostPackage.dependencies ?? {});
 
 	for (const name of dependencyNames) {
+		const modulePackageJsonPath = await findPackageJson(name, moduleRoot);
+		if (!modulePackageJsonPath) {
+			logger.debug({ name, moduleRoot }, 'Dependency not resolvable, skipping');
+			continue;
+		}
+
 		try {
-			const modulePackageJsonPath = requireFromHere.resolve(`${name}/package.json`, { paths: [moduleRoot] });
 			const modulePath = dirname(modulePackageJsonPath);
 			const manifestContent = await readFile(modulePackageJsonPath, 'utf-8');
 			const pkg = JSON.parse(manifestContent) as Record<string, unknown>;
@@ -205,7 +210,7 @@ export async function scanModuleExtensions(
 
 			configs.push(buildExtensionConfig(manifest, name, 'module', modulePath));
 		} catch {
-			// Not resolvable or not an extension — skip.
+			logger.debug({ name }, 'Dependency package.json unreadable, skipping');
 		}
 	}
 
@@ -214,4 +219,29 @@ export async function scanModuleExtensions(
 	}
 
 	return configs;
+}
+
+/**
+ * Locate a dependency's package.json. `require.resolve('<name>/package.json')` fails
+ * for packages whose `exports` map does not expose `./package.json`, so fall back to
+ * walking the node_modules lookup paths from `moduleRoot`.
+ */
+async function findPackageJson(name: string, moduleRoot: string): Promise<string | null> {
+	try {
+		return requireFromHere.resolve(`${name}/package.json`, { paths: [moduleRoot] });
+	} catch {
+		// Hidden by `exports`, or not installed — try the lookup paths.
+	}
+
+	const lookupPaths = createRequire(join(moduleRoot, 'package.json')).resolve.paths(name) ?? [];
+	for (const directory of lookupPaths) {
+		const candidate = join(directory, name, 'package.json');
+		try {
+			await access(candidate);
+			return candidate;
+		} catch {
+			// Not in this node_modules — keep walking up.
+		}
+	}
+	return null;
 }

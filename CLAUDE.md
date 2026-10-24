@@ -7,6 +7,10 @@ Read [AGENTS.md](./AGENTS.md) before changing code. It is the canonical, detaile
 for discovery, manifests, lifecycle, event tiers, service registration, scheduling, cleanup,
 and known limitations. This file is the shorter execution guide for Claude.
 
+Consumer projects (hosts and extension authors) can load the bundled skill at
+[`skills/fastify-extensions/`](./skills/fastify-extensions/SKILL.md). It ships in the npm
+package under `node_modules/@codihaus/fastify-extensions/skills/`.
+
 ## First decide which role you are implementing
 
 ### Host application
@@ -26,6 +30,7 @@ Import host runtime APIs from the package root:
 
 ```ts
 import {
+  ServerExtension,
   ExtensionManager,
   Emitter,
   MemoryScheduleLock,
@@ -49,6 +54,31 @@ import {
 ```
 
 ## Choose the correct boot model
+
+Use the app kit when the host wants Fastify, extensions, health probes, request ids, error
+handling and graceful shutdown in one call:
+
+```ts
+import { ServerExtension } from '@codihaus/fastify-extensions';
+
+const kit = await ServerExtension.start({
+  name: 'myapp',
+  port: 3000,
+  extensions: { manifestKey: 'myapp-extension', extensionsPath: './extensions' },
+  context: (base) => ({ ...base, db }),
+  routes: (app) => { app.get('/', async () => ({ ok: true })); },
+  onClose: () => db.destroy(),
+});
+```
+
+Use `ServerExtension.create(options)` in tests (no listen, no signal handlers). The kit
+seals the registry before `app.before`, so extensions can `consume()` inside every kit init
+event. See AGENTS.md "App Kit" for the full boot order and rules.
+
+Kit defaults, each one can be turned off with `false`: `health` probes, `requestId`,
+`acceptEmptyJson`, `errorHandler`, `notFoundHandler`, and `view` (Liquid via
+`@fastify/view`; `pug` / `twig` when the host installs them). Output escaping is on for all
+three engines.
 
 Use the two-phase manager when extensions must observe host events before Fastify routes
 and plugins have finished mounting:
@@ -90,7 +120,8 @@ Do not violate these rules:
 
 1. `createContext` runs exactly once per loaded extension id. Reuse that context across both
    phases.
-2. Run `scanAndLoadHooks()` before `loadEndpoints(app)`.
+2. Run `scanAndLoadHooks()` before `loadEndpoints(app)`. Call `registerServices()` between
+   them when host init events emitted before Phase 2 must see sealed services.
 3. Each phase is one-shot per cycle. Call `reset()` before beginning another cycle.
 4. Register service providers from an init handler for the exact
    `extensions.register` event.
@@ -156,7 +187,8 @@ Local extensions take precedence over installed dependencies with the same id.
 ## Scheduling checklist
 
 - Use `hook.schedule(cron, handler)` inside extensions.
-- Do not manually add the `ext:<id>:` prefix; the hook context does that.
+- Do not manually add the `ext:<id>:` prefix; the hook context does that. A repeated cron in
+  the same extension gets a `#2`, `#3`, ... suffix.
 - The default `MemoryScheduleLock` is for a single process.
 - Supply a Redis- or database-backed `ScheduleLock` for replicated deployments.
 - Treat scheduled handlers as trusted server-side code with normal process permissions.
@@ -170,6 +202,27 @@ and isolated.
 Extensions are trusted Node.js modules. This package provides architectural governance, not
 a VM, worker, process, permission, filesystem, network, environment, or secret sandbox.
 
+## Working on this repository
+
+Source layout (details in AGENTS.md "Source Layout"):
+
+```
+src/index.ts   public barrel        src/types.ts   ./types subpath (runtime-free)
+src/kernel/    manager, discovery, loader, registry — no Fastify runtime import
+src/runtime/   emitter, schedule, logger
+src/plugin/    fastify-extensions.ts (one-phase plugin)
+src/kit/       ServerExtension + options, http-defaults, health, shutdown, view
+```
+
+- Keep the dependency direction: `kit` and `plugin` → `kernel` → `runtime` → `types`.
+- Keep `src/index.ts` and `src/types.ts` at the root; they are the tsdown entries behind the
+  `exports` map.
+- The kit is a fast, flexible starter. Prefer secure defaults the host can override, and warn
+  instead of throw on misconfiguration. Do not remove escape hatches.
+- Add a regression test for every bug fix and check it fails on the old code.
+- `package.json` drives the published version (see `.github/DEPLOYMENT.md`). Do not bump it
+  unless asked.
+
 ## Validation before handing work back
 
 For changes to this package, run:
@@ -177,8 +230,11 @@ For changes to this package, run:
 ```bash
 npm run typecheck
 npm test
+npm run test:types
 npm run build
 npm pack --dry-run
+(cd examples/consumer-app && npm test)
+(cd examples/kit-app && npm install && npm run typecheck && npm test)
 ```
 
 For host or extension integrations, additionally verify:

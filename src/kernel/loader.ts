@@ -9,8 +9,8 @@ import type {
 	ExtensionManifest,
 	HookConfig,
 	HookContext,
-} from './types.js';
-import type { Emitter } from './emitter.js';
+} from '../types.js';
+import type { Emitter } from '../runtime/emitter.js';
 
 /** The detected shape of a loaded extension module (see REQUIREMENTS §5.2). */
 export type ExtensionShape =
@@ -72,7 +72,8 @@ export async function importExtensionModule(
 
 /**
  * Classify a loaded module (see REQUIREMENTS §5.2):
- * - a `hooks`/`endpoints` named export → bundle
+ * - a `hooks`/`endpoints` named export, or an `endpoint_<name>` export for a declared
+ *   endpoint entry → bundle
  * - a function default export → endpoint when `manifest.type === 'endpoint'` and no
  *   `bundle` marker, otherwise hook
  * - anything else → unknown
@@ -84,7 +85,10 @@ export function classifyModule(
 ): ExtensionShape {
 	const hasHooks = typeof module['hooks'] === 'function';
 	const hasEndpoints = typeof module['endpoints'] === 'function';
-	if (hasHooks || hasEndpoints) {
+	const hasEntryEndpoints = config.entries.some(
+		(entry) => entry.type === 'endpoint' && typeof module[`endpoint_${entry.name}`] === 'function',
+	);
+	if (hasHooks || hasEndpoints || hasEntryEndpoints) {
 		return { kind: 'bundle', hasHooks, hasEndpoints };
 	}
 
@@ -113,6 +117,9 @@ export async function registerHook<TContext>(
 	context: TContext,
 	cleanupFns: Array<() => void | Promise<void>>,
 ): Promise<void> {
+	// Same cron registered twice in one extension must still get distinct names, or a
+	// shared ScheduleLock lets only one of them claim each tick.
+	const scheduleCounts = new Map<string, number>();
 	const hookContext: HookContext<unknown> = {
 		filter: (event, handler) => {
 			emitter.onFilter(event, handler);
@@ -127,7 +134,9 @@ export async function registerHook<TContext>(
 			cleanupFns.push(() => emitter.offInit(event, handler));
 		},
 		schedule: (cron, handler) => {
-			const name = `ext:${config.id}:${cron}`;
+			const count = (scheduleCounts.get(cron) ?? 0) + 1;
+			scheduleCounts.set(cron, count);
+			const name = count === 1 ? `ext:${config.id}:${cron}` : `ext:${config.id}:${cron}#${count}`;
 			const unregister = emitter.addSchedule(name, cron, handler);
 			cleanupFns.push(unregister);
 		},

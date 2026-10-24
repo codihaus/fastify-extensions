@@ -1,0 +1,9 @@
+{
+  "name": "entry-endpoints-only",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "test-extension": {
+    "entries": [{ "type": "endpoint", "name": "only" }]
+  }
+}

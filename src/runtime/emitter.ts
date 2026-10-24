@@ -4,7 +4,7 @@ import type {
 	FilterHandler,
 	InitHandler,
 	ScheduleLock,
-} from './types.js';
+} from '../types.js';
 import { MemoryScheduleLock, scheduleCronJob, validateCron, type ScheduledJob } from './schedule.js';
 import { createConsoleLogger } from './logger.js';
 

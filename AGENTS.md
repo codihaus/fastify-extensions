@@ -19,6 +19,34 @@ npm install @codihaus/fastify-extensions
 5. **`ServiceRegistry`** — cross-extension service sharing (`provide`/`consume`), sealed right after the `extensions.register` init event.
 6. **`./types` subpath** — the zero-runtime surface for extension AUTHORS (`defineHook`, `defineEndpoint`, `createServiceRef`, plus all type names). Never import the manager/loader from here.
 
+## Source Layout
+
+```
+src/
+├── index.ts          public barrel (package root export)
+├── types.ts          authoring surface, published as ./types — runtime-free
+├── kernel/           extension microkernel (no Fastify runtime import)
+│   ├── manager.ts    ExtensionManager: lifecycle phases, mustLoad, cleanup
+│   ├── discovery.ts  local + npm-dependency scan, manifest validation
+│   ├── loader.ts     import, shape classification, hook/endpoint registration
+│   └── registry.ts   cross-extension service registry
+├── runtime/          shared by kernel and kit
+│   ├── emitter.ts    filter / action / init tiers + schedules
+│   ├── schedule.ts   cron jobs + ScheduleLock
+│   └── logger.ts     console fallback logger
+├── plugin/
+│   └── fastify-extensions.ts   one-phase Fastify plugin
+└── kit/              app kit (ServerExtension)
+    ├── server-extension.ts     boot order, listen, close, signals
+    ├── options.ts              AppKitOptions + context/plugin types
+    ├── http-defaults.ts        Fastify defaults, request id, empty JSON, error/404
+    ├── health.ts               live/ready probes
+    ├── shutdown.ts             phased shutdown hooks with timeout
+    └── view.ts                 @fastify/view + liquid / pug / twig
+```
+
+Dependency direction: `kit` and `plugin` → `kernel` → `runtime` → `types`. Nothing imports `kit` except `index.ts`.
+
 ## Boot Order
 
 ```
@@ -26,9 +54,63 @@ manager = new ExtensionManager({ manifestKey, extensionsPath, createContext, ...
 await manager.scanAndLoadHooks()        // Phase 1: scan -> import -> register hooks -> mustLoad check
                                          // (host may emit its own early events on manager.emitter here)
 app = fastify()                         // host builds the Fastify instance, mounts its own routes
-await manager.loadEndpoints(app)        // Phase 2: mount endpoints -> onManifest -> emitInit('extensions.register') -> registry.seal()
+await manager.registerServices()        // OPTIONAL Phase 1.5: emitInit('extensions.register') -> registry.seal()
+                                         // (call it when host init events emitted before Phase 2 must see sealed services)
+await manager.loadEndpoints(app)        // Phase 2: mount endpoints -> onManifest -> [emitInit('extensions.register') -> registry.seal(),
+                                         //   only if registerServices() did not run]
 app.listen()
 ```
+
+## App Kit (`ServerExtension`)
+
+One-call boot for hosts that want the full stack. Import from the package root.
+
+```ts
+import { ServerExtension } from '@codihaus/fastify-extensions';
+
+const kit = await ServerExtension.start({            // create() = same, without listen/signals
+	name: 'orders',
+	port: 3000, host: '0.0.0.0',                       // defaults 3000 / 127.0.0.1
+	extensions: { manifestKey: 'orders-extension', extensionsPath: './extensions' },  // omit = no extensions
+	context: (base) => ({ ...base, db }),             // default: AppKitBaseContext
+	services: (registry, kit) => {},                   // host provide() before extensions.register
+	plugins: [[import('@fastify/cors'), { origin: true }]],
+	middlewares: (app, kit) => {},
+	routes: (app, kit) => {},
+	onReady: (kit) => {},
+	onClose: (kit) => {},                              // shutdown phase "connections"
+	health: { path: '/health', checks: { db: () => db.ping() }, timeoutMs: 3000 },
+	view: { engine: 'liquid', root: './views' },      // default liquid; 'pug' | 'twig' need the host to install them; false = off
+	fastify: { /* FastifyServerOptions, override kit defaults */ },
+});
+```
+
+Kit boot order (mirrors ODP core `service/api`):
+
+```
+Fastify(...) + onRequest health/request-id + error/404 handlers
+manager.scanAndLoadHooks()                      // Phase 1
+options.services -> manager.registerServices()  // registry sealed BEFORE any kit init event
+register @fastify/view (unless view: false)     // reply.view available to host routes AND extension endpoints
+init app.before -> plugins -> init middlewares.before -> options.middlewares -> init middlewares.after
+init routes.before -> options.routes -> manager.loadEndpoints(app) -> init routes.after
+init app.after -> app.ready() -> options.onReady
+start(): listen -> action server.start { address, port, host }; SIGINT/SIGTERM -> close
+close(): action server.stop { reason } -> app.close() -> shutdown hooks: workers -> schedules (manager.reset) -> connections (onClose)
+```
+
+Kit rules:
+
+- Init event meta is `{ app }`. Kit actions (`server.start`, `server.stop`) pass `undefined` as event context.
+- The kit owns its emitter. `close()` (or `app.close()`) stops every extension schedule.
+- `close()` is idempotent. `listen()` runs once, only in state `ready`.
+- A boot failure closes the app, runs the shutdown hooks, and rethrows.
+- Extensions register their own shutdown work with `context.onShutdown(phase, name, run)` (name is prefixed with the extension id).
+- Hooks of one shutdown phase run in parallel. A hook that throws or exceeds `shutdownTimeoutMs` (default 10000) is logged and skipped.
+- The kit reads no environment variables. Pass `port`/`host` explicitly. (Exception: view template caching defaults to `NODE_ENV === 'production'`, the `@fastify/view` default; set `view.production` to override.)
+- View output is HTML-escaped on every engine (Liquid `outputEscape: 'escape'`, Twig `autoescape`, Pug `#{}`). Do not turn escaping off for user data; use `| raw` / `!{}` only for trusted HTML. Twig: `@fastify/view` merges `view.options` into render data, so never pass a `settings` key in view data (it would replace the autoescape setting).
+- `liquidjs` and `@fastify/view` are dependencies; `pug` and `twig` are optional peers loaded lazily. A missing engine fails boot with the `npm install` command in the message.
+- `process.exit` is called only by the signal handler of `start()`, and only when `exitOnSignal` is not `false`. A second signal during shutdown exits with code 1.
 
 Single-phase convenience (no pre-server hooks needed):
 
@@ -46,6 +128,8 @@ await app.register(fastifyExtensions, {
 ```
 
 The plugin is NOT wrapped with `fastify-plugin` — `app.register()` runs it in an encapsulated child scope: extension routes are confined to that scope, and the `extensions` decorator is set on the child scope, so the OUTER `app.extensions` is `undefined`. Get the manager via the `onManager` option (above), or call the plugin function directly — `await fastifyExtensions(app, options)` — to mount at the root and decorate the exact instance you hold (`app.extensions` then works).
+
+If Phase 1 or Phase 2 throws (e.g. a missing `mustLoad` id), the plugin calls `manager.reset()` before rethrowing, so no hook or cron job outlives the failed boot. A second direct call on an instance that already has `extensions` keeps the first decorator, logs a warning, and hands the new manager out through `onManager` only.
 
 ## `ExtensionManagerOptions<TContext>`
 
@@ -85,7 +169,7 @@ class ExtensionManager<TContext> {
 
 Given the resolved entry module (a namespace record):
 
-1. **Bundle** — named exports `hooks(hook, context)` and/or `endpoints(router, context)`.
+1. **Bundle** — named exports `hooks(hook, context)` and/or `endpoints(router, context)`, or at least one `endpoint_X` export matching a declared endpoint entry.
    - `hooks` registers in Phase 1.
    - `endpoints` mounts in Phase 2 under `/<first manifest endpoint entry name, else the extension id>`.
    - Each manifest entry `{ type: "endpoint", name: X }` additionally looks for a named export `endpoint_X` and mounts it under `/X`.
@@ -119,7 +203,7 @@ Invalid manifest (fails `validateManifest`) → warn + extension excluded from t
 ## Discovery Rules
 
 - **Local scan** (`scanLocalExtensions`) — each subdirectory of `extensionsPath` with a readable `package.json` containing `manifestKey` is a candidate. Unreadable dir → empty result (debug log). Invalid JSON → warn, skip that entry.
-- **Module scan** (`scanModuleExtensions`) — reads `dependencies` (never `devDependencies`) of the package.json at `moduleRoot`, resolves each via `createRequire(...).resolve('<name>/package.json', { paths: [moduleRoot] })`. Unresolvable → silently skipped.
+- **Module scan** (`scanModuleExtensions`) — reads `dependencies` (never `devDependencies`) of the package.json at `moduleRoot`, resolves each via `createRequire(...).resolve('<name>/package.json', { paths: [moduleRoot] })`, falling back to the node_modules lookup paths from `moduleRoot` when the package's `exports` map hides `./package.json`. Unresolvable → skipped with a debug log.
 - **Precedence** — local wins over module on id collision; module configs whose id already exists locally are dropped from `scanExtensions()`'s result.
 - **`isEnabled(id)`** is consulted in `scanAndLoadHooks()` (Phase 1) only — a disabled extension still shows up in `scanExtensions()` but is never loaded. `isEnabled` throwing is treated as fail-open (`enabled = true`, warn logged).
 
@@ -192,7 +276,7 @@ interface ScheduleLock {
 }
 ```
 
-Default `MemoryScheduleLock` always claims (correct for a single instance). Back it with Redis/DB for multi-instance deployments so only one instance runs a given cron tick. Passed via `ExtensionManagerOptions.scheduleLock` — only takes effect when the manager owns the emitter (i.e. `emitter` option was not injected).
+Default `MemoryScheduleLock` always claims (correct for a single instance). Back it with Redis/DB for multi-instance deployments so only one instance runs a given cron tick. Passed via `ExtensionManagerOptions.scheduleLock` — only takes effect when the manager owns the emitter (i.e. `emitter` option was not injected). Passing both `emitter` and `scheduleLock` logs a warning; give the lock to the injected `Emitter` instead.
 
 ## Logger
 
@@ -242,7 +326,7 @@ A host typically re-publishes these symbols from its own types package pre-bound
 - No runtime npm install — extensions must already be on disk (`extensionsPath` folder or resolvable `node_modules` dependency).
 - Extensions are trusted code — no vm/worker sandboxing.
 - `manifestKey` has no default — every host must pick its own key to avoid ecosystem collisions.
-- One-shot lifecycle — `scanAndLoadHooks()` and `loadEndpoints()` each run once per cycle (`idle -> hooks-loaded -> ready`); calling either again throws until `reset()` returns the manager to `idle`. An `extensions.register` init failure propagates but still seals the registry (terminal cycle).
+- One-shot lifecycle — `scanAndLoadHooks()`, `registerServices()` and `loadEndpoints()` each run once per cycle (`idle -> hooks-loaded -> ready`); calling either again throws until `reset()` returns the manager to `idle`. An `extensions.register` init failure propagates but still seals the registry (terminal cycle).
 - Load results are truthful — unrecognized module shapes and extensions whose endpoint setup throws are skipped/discarded, never reported by `getExtensions()`. Routes mounted before an endpoint setup threw remain reachable (partial mount).
 - Duplicate ids — within one source the alphabetically/declaration-first candidate wins and the duplicate is logged as an error; across sources, local wins over module.
 
@@ -250,8 +334,8 @@ A host typically re-publishes these symbols from its own types package pre-bound
 
 1. `createContext` is called exactly ONCE per extension id and the same instance flows to both the hook phase and the endpoint phase — do not rebuild context per phase.
 2. `manager.emitter` and `manager.registry` are getters — treat them as read-only handles, never reassign.
-3. `extensions.register` fires (via `emitInit`) and the registry seals INSIDE `loadEndpoints`, in that order — cross-extension `provide` must happen in an `init` handler subscribed to that exact event name.
-4. `hook.schedule(cron, handler)` auto-namespaces the job as `ext:<id>:<cron>`; do not add your own prefix.
+3. `extensions.register` fires (via `emitInit`) and the registry seals inside `registerServices()` when the host calls it (the kit always does), otherwise INSIDE `loadEndpoints` after endpoints mount — cross-extension `provide` must happen in an `init` handler subscribed to that exact event name.
+4. `hook.schedule(cron, handler)` auto-namespaces the job as `ext:<id>:<cron>`; do not add your own prefix. A repeated cron in the same extension gets `#2`, `#3`, ... so a shared `ScheduleLock` sees separate jobs.
 5. Bundle endpoint prefix rule: `endpoints` export mounts under the FIRST `entries` item with `type: "endpoint"` (falls back to the extension id if none declared); every other declared endpoint entry `X` needs its own `endpoint_X` export to mount under `/X`.
 6. A default-export module is only treated as an endpoint when `manifest.type === "endpoint"` AND `manifest.bundle` is `null`/absent — a non-null `bundle` string forces hook classification even with a default export.
 7. Module (npm-dependency) discovery only scans `dependencies`, never `devDependencies` — do not expect a dev-only extension package to be picked up.

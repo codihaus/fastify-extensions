@@ -298,3 +298,78 @@ describe('P1 — extensions.register failure is terminal but sealed', () => {
 		await manager.reset();
 	});
 });
+
+// Review 2026-10-24 — one describe per fixed finding.
+const strictModuleRoot = join(currentDir, 'fixtures/module-strict');
+
+describe('A — module discovery finds packages whose exports map hides package.json', () => {
+	it('discovers plain and scoped strict-exports packages and skips an uninstalled dependency', async () => {
+		const logger = createFakeLogger();
+		const manager = makeManager(join(currentDir, 'fixtures/does-not-exist'), logger, { moduleRoot: strictModuleRoot });
+
+		const configs = await manager.scanExtensions();
+		expect(configs.map((config) => config.id).sort()).toEqual(['scoped-strict', 'strict-ext']);
+		expect(configs.every((config) => config.source === 'module')).toBe(true);
+
+		const skipped = logger.calls.filter((call) => call.level === 'debug' && String(call.msg).includes('not resolvable'));
+		expect(skipped.map((call) => (call.obj as { name: string }).name)).toEqual(['not-installed']);
+	});
+});
+
+describe('B — schedules on the same cron in one extension get distinct names', () => {
+	it('suffixes the repeated cron so a shared ScheduleLock sees separate jobs', async () => {
+		const released: string[] = [];
+		const scheduleLock = {
+			claim: async () => true,
+			release: async (name: string) => {
+				released.push(name);
+			},
+		};
+		const manager = makeManager(shapeFixtures, createFakeLogger(), {
+			isEnabled: (id: string) => id === 'dup-cron',
+			scheduleLock,
+		});
+
+		await manager.scanAndLoadHooks();
+		await manager.reset();
+
+		expect(released.sort()).toEqual(['ext:dup-cron:0 0 1 1 *', 'ext:dup-cron:0 0 1 1 *#2', 'ext:dup-cron:0 0 2 1 *']);
+	});
+});
+
+describe('C — a bundle with only endpoint_<name> exports is recognized', () => {
+	it('loads the extension and mounts the entry endpoint', async () => {
+		const logger = createFakeLogger();
+		const manager = makeManager(shapeFixtures, logger, { isEnabled: (id: string) => id === 'entry-endpoints-only' });
+		const app = fastify();
+
+		await manager.scanAndLoadHooks();
+		await manager.loadEndpoints(app);
+
+		expect(manager.getExtensions().map((config) => config.id)).toEqual(['entry-endpoints-only']);
+		const response = await app.inject({ method: 'GET', url: '/only/ping' });
+		expect(response.json()).toEqual({ scope: 'only' });
+
+		await app.close();
+		await manager.reset();
+	});
+});
+
+describe('D — scheduleLock alongside an injected emitter', () => {
+	it('warns that the lock is ignored', () => {
+		const logger = createFakeLogger();
+		makeManager(localFixtures, logger, {
+			emitter: new Emitter({ logger }),
+			scheduleLock: { claim: async () => true, release: async () => {} },
+		});
+		const warnings = logger.calls.filter((call) => call.level === 'warn' && String(call.msg).includes('"scheduleLock" is ignored'));
+		expect(warnings).toHaveLength(1);
+	});
+
+	it('stays silent when only one of them is passed', () => {
+		const logger = createFakeLogger();
+		makeManager(localFixtures, logger, { scheduleLock: { claim: async () => true, release: async () => {} } });
+		makeManager(localFixtures, logger, { emitter: new Emitter({ logger }) });
+		expect(logger.calls.filter((call) => call.level === 'warn')).toHaveLength(0);
+	});
+});

@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { validateManifest, ExtensionManager } from '../src/index.js';
 import type { ExtensionConfig, ExtensionLoggerLike } from '../src/index.js';
-import { entryPointToUrl } from '../src/loader.js';
+import { entryPointToUrl } from '../src/kernel/loader.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const localFixtures = join(currentDir, 'fixtures/local');

@@ -1,4 +1,4 @@
-import type { ExtensionLoggerLike, ServiceRef, ServiceRegistry } from './types.js';
+import type { ExtensionLoggerLike, ServiceRef, ServiceRegistry } from '../types.js';
 
 /**
  * Cross-extension service registry.

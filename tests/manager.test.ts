@@ -259,3 +259,76 @@ describe('ExtensionManager', () => {
 		await app.close();
 	});
 });
+
+describe('ExtensionManager.registerServices', () => {
+	function createManager(): ExtensionManager<TestContext> {
+		return new ExtensionManager<TestContext>({
+			manifestKey: MANIFEST_KEY,
+			extensionsPath: LOCAL_FIXTURES,
+			moduleRoot: false,
+			logger: createFakeLogger().logger,
+			createContext: (config) => ({ id: config.id, marks: [], actions: [] }),
+		});
+	}
+
+	it('seals the registry before Phase 2 and loadEndpoints does not re-emit extensions.register', async () => {
+		const manager = createManager();
+		let registerCalls = 0;
+		manager.emitter.onInit('extensions.register', () => {
+			registerCalls += 1;
+		});
+
+		await manager.scanAndLoadHooks();
+		expect(manager.registrySealed).toBe(false);
+
+		await manager.registerServices();
+		expect(manager.registrySealed).toBe(true);
+		expect(registerCalls).toBe(1);
+
+		const app = fastify();
+		await manager.loadEndpoints(app);
+		expect(registerCalls).toBe(1);
+
+		const response = await app.inject({ method: 'GET', url: '/endpoint-basic/ping' });
+		expect(response.json()).toEqual({ ok: true, id: 'endpoint-basic' });
+
+		await manager.reset();
+		await app.close();
+	});
+
+	it('refuses to run before Phase 1, twice, or after Phase 2, and is available again after reset()', async () => {
+		const manager = createManager();
+		await expect(manager.registerServices()).rejects.toThrow('must run after scanAndLoadHooks()');
+
+		await manager.scanAndLoadHooks();
+		await manager.registerServices();
+		await expect(manager.registerServices()).rejects.toThrow('already ran');
+
+		const app = fastify();
+		await manager.loadEndpoints(app);
+		await expect(manager.registerServices()).rejects.toThrow('called in phase "ready"');
+
+		await manager.reset();
+		expect(manager.registrySealed).toBe(false);
+		await manager.scanAndLoadHooks();
+		await manager.registerServices();
+		expect(manager.registrySealed).toBe(true);
+
+		await manager.reset();
+		await app.close();
+	});
+
+	it('propagates an init error but still seals the registry', async () => {
+		const manager = createManager();
+		manager.emitter.onInit('extensions.register', () => {
+			throw new Error('provider failed');
+		});
+
+		await manager.scanAndLoadHooks();
+		await expect(manager.registerServices()).rejects.toThrow('provider failed');
+		expect(manager.registrySealed).toBe(true);
+		await expect(manager.registerServices()).rejects.toThrow('already ran');
+
+		await manager.reset();
+	});
+});
