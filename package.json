@@ -1,6 +1,6 @@
 {
   "name": "@codihaus/fastify-extensions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Manifest-based extension system for Fastify: discovery, typed context injection, hooks, endpoints, lifecycle",
   "license": "MIT",
   "type": "module",
