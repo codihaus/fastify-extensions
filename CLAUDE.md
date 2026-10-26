@@ -212,6 +212,7 @@ src/kernel/    manager, discovery, loader, registry — no Fastify runtime impor
 src/runtime/   emitter, schedule, logger
 src/plugin/    fastify-extensions.ts (one-phase plugin)
 src/kit/       ServerExtension + options, http-defaults, health, shutdown, view
+src/cli/       scaffolder behind bin/fastify-extensions.js; templates in templates/
 ```
 
 - Keep the dependency direction: `kit` and `plugin` → `kernel` → `runtime` → `types`.
@@ -235,6 +236,16 @@ npm run build
 npm pack --dry-run
 (cd examples/consumer-app && npm test)
 (cd examples/kit-app && npm install && npm run typecheck && npm test)
+```
+
+For changes to `src/cli/` or `templates/`, also generate an app from the packed tarball and
+run its checks for each view engine:
+
+```bash
+npm pack --pack-destination /tmp/fx && cd "$(mktemp -d)" && npm init -y
+npm i /tmp/fx/codihaus-fastify-extensions-*.tgz
+npx fastify-extensions init --view liquid   # repeat with pug and twig
+npm run typecheck && npm test && npm run build && node dist/src/server.js
 ```
 
 For host or extension integrations, additionally verify:

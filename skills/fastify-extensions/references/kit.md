@@ -10,6 +10,7 @@
 7. Views
 8. Testing
 9. Recipes
+10. Generated app (CLI)
 
 ## 1. API
 
@@ -240,3 +241,50 @@ extensions: { manifestKey: 'orders-extension', extensionsPath: './extensions', s
 ```ts
 await ServerExtension.start({ port: 3000, routes: (app) => { /* ... */ } });
 ```
+
+## 10. Generated app (CLI)
+
+`npx fastify-extensions init [dir]` (after installing the package) or
+`npx @codihaus/fastify-extensions init my-app` generates:
+
+```
+src/
+  server.ts         ServerExtension.start
+  app.ts            appOptions(), shared by server and tests
+  config.ts         environment -> typed config
+  contracts.ts      AppContext + service refs for extensions
+  routes.ts         URL -> controller
+  controllers/      request handling: render a view or return JSON
+  services/         business logic, emits products.create / products.created
+  models/           data access (in memory; replace with your database client)
+  middlewares/      global hooks
+views/              layouts/, partials/, one folder per controller
+public/             static files served at /public/
+extensions/         audit (hook: filter, action, service, schedule), reports (endpoint at /reports)
+test/               node:test smoke tests with app.inject
+scripts/build.mjs   tsc to dist/ + copy views, public and extension manifests
+```
+
+Where to put new code:
+
+| Need | Place |
+|---|---|
+| Host page or API | controller method + line in `src/routes.ts`; view under `views/<controller>/` |
+| Business rule | service method; validate after `emitFilter` so extensions cannot skip it |
+| Database access | model class; keep method signatures, swap the in-memory body |
+| New setting | `AppConfig` + `loadConfig()` in `src/config.ts` |
+| Global hook (auth, rate limit) | `src/middlewares/`, called from `registerMiddlewares` |
+| Pluggable behavior | new folder in `extensions/` with the manifest key from `src/app.ts` |
+| Service shared between extensions | ref in `src/contracts.ts`, `provide` in `init('extensions.register')` |
+
+Rules of the generated app:
+
+- Extension manifests use `"main": "index.js"`. tsx resolves it to `index.ts` in dev; the
+  build emits `index.js`. Keep new extensions the same way.
+- `config.root` is the project root in dev and `dist/` after build; resolve views, public
+  and extensions from it, never from `process.cwd()`.
+- `npm run build` runs `scripts/build.mjs`: tsc, then copies `views/`, `public/` and every
+  `extensions/*/package.json` into `dist/`. Add other runtime assets there.
+- `mustLoad` in `src/app.ts` lists the sample extensions; update it when you add or remove
+  required ones.
+- Tests use `node:test` through `tsx --test`; `ServerExtension.create` + `app.inject`.

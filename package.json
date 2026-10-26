@@ -17,8 +17,13 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "fastify-extensions": "./bin/fastify-extensions.js"
+  },
   "files": [
     "dist",
+    "bin",
+    "templates",
     "AGENTS.md",
     "CLAUDE.md",
     "skills"

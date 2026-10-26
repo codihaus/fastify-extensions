@@ -212,6 +212,42 @@ npm install @codihaus/fastify-extensions
 `fastify` là optional peer dependency. Hãy cài Fastify khi sử dụng endpoint extension hoặc
 plugin wrapper. Host chỉ dùng hook, emitter và scheduling không cần Fastify ở runtime.
 
+## Tạo app mới bằng CLI
+
+CLI sinh sẵn app MVC TypeScript có view, static file, 2 extension mẫu, test và bước build production:
+
+```bash
+mkdir my-app && cd my-app
+npm init -y
+npm install @codihaus/fastify-extensions
+npx fastify-extensions init        # --view pug|twig  --name <name>  --no-install  --force
+npm run dev
+```
+
+Hoặc tạo vào folder mới trong 1 lệnh: `npx @codihaus/fastify-extensions init my-app`.
+
+```
+src/
+  server.ts         ServerExtension.start
+  app.ts            appOptions(), dùng chung cho server và test
+  config.ts         biến môi trường -> typed config
+  contracts.ts      AppContext + service ref cho extension
+  routes.ts         URL -> controller
+  controllers/      xử lý request: render view hoặc trả JSON
+  services/         business logic, emit products.create / products.created
+  models/           data access (in-memory; thay bằng database client của bạn)
+  middlewares/      global hook
+views/              layouts/, partials/, mỗi controller 1 folder
+public/             static file tại /public/
+extensions/         audit (hook: filter, action, service, schedule), reports (endpoint at /reports)
+test/               smoke test node:test với app.inject
+scripts/build.mjs   tsc ra dist/ + copy views, public và manifest của extension
+```
+
+`npm run build` compile ra `dist/`, `npm start` chạy `node dist/src/server.js`. Manifest của
+extension trỏ tới `index.js`; khi dev, tsx tự map sang `index.ts`. CLI merge vào `package.json`
+có sẵn và không ghi đè file khác nếu không có `--force`.
+
 ## Feature lab có thể chạy trực tiếp
 
 [Consumer app](./examples/consumer-app) cài package đã publish trên npm và kiểm thử discovery,

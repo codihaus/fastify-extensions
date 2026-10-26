@@ -1,0 +1,14 @@
+{% extends "../layouts/base.twig" %}
+{% block content %}
+<h1>{{ appName }}</h1>
+<p>Edit <code>src/controllers/home.controller.ts</code> and <code>views/home/index.twig</code>.</p>
+<h2>Latest products</h2>
+<ul>
+{% for product in products %}  <li>{{ product.name }} — {{ product.price }}</li>
+{% endfor %}</ul>
+<p>
+  <a href="/api/products">JSON API</a> ·
+  <a href="/reports/summary">Report (extension)</a> ·
+  <a href="/health/ready">Health</a>
+</p>
+{% endblock %}

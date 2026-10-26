@@ -43,9 +43,26 @@ src/
     ├── health.ts               live/ready probes
     ├── shutdown.ts             phased shutdown hooks with timeout
     └── view.ts                 @fastify/view + liquid / pug / twig
+└── cli/              app scaffolder (bin: fastify-extensions)
+    ├── index.ts                argument parsing, install, next steps
+    └── scaffold.ts             template copy, placeholder replace, package.json merge
+
+bin/fastify-extensions.js       bin wrapper: passes the package root to dist/cli
+templates/app/                  generated app (TypeScript MVC, extensions, tests, build script)
+templates/views/<engine>/       views per engine, copied to views/
 ```
 
 Dependency direction: `kit` and `plugin` → `kernel` → `runtime` → `types`. Nothing imports `kit` except `index.ts`.
+`cli` imports only Node built-ins and is not exported from `index.ts`.
+
+Template rules:
+
+- Templates use `__APP_NAME__`, `__MANIFEST_KEY__` and `__VIEW_ENGINE__` placeholders. Dotfiles are
+  stored as `_name` (npm drops or renames dotfiles in tarballs) and renamed on copy.
+- Extension manifests in the template use `"main": "index.js"`: tsx maps it to `index.ts` in
+  development, and the build emits it. Do not point them at `.ts`.
+- A view added for one engine must be added for all three engines.
+- Verify template changes in a generated project from `npm pack`, not only with `tests/cli.test.ts`.
 
 ## Boot Order
 

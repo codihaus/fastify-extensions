@@ -1,8 +1,8 @@
 ---
 name: fastify-extensions
 description: >-
-  Build consumer projects on @codihaus/fastify-extensions: boot a Fastify app in one call
-  with the ServerExtension app kit, wire the manual ExtensionManager or the
+  Build consumer projects on @codihaus/fastify-extensions: scaffold a new MVC app with the
+  CLI (npx fastify-extensions init), boot a Fastify app with the ServerExtension app kit, wire the manual ExtensionManager or the
   fastifyExtensions plugin, and write extension packages (hook, endpoint, bundle) with
   manifests, typed context, filter/action/init events, shared services
   (createServiceRef, provide, consume), cron schedules, health probes, graceful shutdown,
@@ -43,7 +43,21 @@ This keeps extensions swappable and lets the host change its internals freely.
 | **Manual** `ExtensionManager` | The host already owns a custom bootstrap and needs exact control of each step. | `references/manual-and-plugin.md` |
 | **Plugin** `fastifyExtensions` | Only mount extensions into an existing app, no host events between phases. | `references/manual-and-plugin.md` |
 
-Minimal kit app:
+For a new project, generate the app instead of writing the bootstrap by hand. The CLI
+creates a TypeScript MVC layout (controllers, services, models, views, public, two sample
+extensions, tests, build to `dist/`):
+
+```bash
+npm install @codihaus/fastify-extensions
+npx fastify-extensions init            # --view pug|twig, --name, --no-install, --force
+# or, into a new folder: npx @codihaus/fastify-extensions init my-app
+```
+
+Then add features inside that layout: a controller + route for host pages and APIs, a
+service for business rules, a folder under `extensions/` for pluggable behavior. Details:
+`references/kit.md` section 10.
+
+Minimal kit app (what `src/app.ts` + `src/server.ts` reduce to):
 
 ```ts
 import { ServerExtension } from '@codihaus/fastify-extensions';

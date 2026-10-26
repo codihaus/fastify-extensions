@@ -1,0 +1,16 @@
+extends ../layouts/base
+
+block content
+  h1 Products
+  table
+    thead
+      tr
+        th ID
+        th Name
+        th Price
+    tbody
+      each product in products
+        tr
+          td= product.id
+          td= product.name
+          td= product.price

@@ -211,6 +211,43 @@ npm install @codihaus/fastify-extensions
 `fastify` is an optional peer dependency. Install Fastify when you use endpoint extensions
 or the plugin wrapper. Hook-, emitter-, and scheduling-only hosts do not need its runtime.
 
+## Scaffold a new app
+
+Generate a TypeScript MVC app with views, static files, two sample extensions, tests, and a
+production build:
+
+```bash
+mkdir my-app && cd my-app
+npm init -y
+npm install @codihaus/fastify-extensions
+npx fastify-extensions init        # --view pug|twig  --name <name>  --no-install  --force
+npm run dev
+```
+
+Or generate into a new folder in one step: `npx @codihaus/fastify-extensions init my-app`.
+
+```
+src/
+  server.ts         ServerExtension.start
+  app.ts            appOptions(), shared by server and tests
+  config.ts         environment -> typed config
+  contracts.ts      AppContext + service refs for extensions
+  routes.ts         URL -> controller
+  controllers/      request handling: render a view or return JSON
+  services/         business logic, emits products.create / products.created
+  models/           data access (in memory; replace with your database client)
+  middlewares/      global hooks
+views/              layouts/, partials/, one folder per controller
+public/             static files served at /public/
+extensions/         audit (hook: filter, action, service, schedule), reports (endpoint at /reports)
+test/               node:test smoke tests with app.inject
+scripts/build.mjs   tsc to dist/ + copy views, public and extension manifests
+```
+
+`npm run build` compiles to `dist/`, and `npm start` runs `node dist/src/server.js`. Extension
+manifests point at `index.js`; tsx maps it to `index.ts` in development. The CLI merges into an
+existing `package.json` and does not overwrite other files without `--force`.
+
 ## Runnable feature lab
 
 The [consumer app](./examples/consumer-app) installs the published npm package and exercises

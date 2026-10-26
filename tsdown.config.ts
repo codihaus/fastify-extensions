@@ -13,5 +13,5 @@ export default defineConfig({
 	// Keep ESM output as .js/.d.ts (package is type:module) — the exports map and
 	// the REQUIREMENTS §2 contract reference dist/index.js, not .mjs.
 	fixedExtension: false,
-	entry: ['src/index.ts', 'src/types.ts'],
+	entry: ['src/index.ts', 'src/types.ts', 'src/cli/index.ts'],
 });

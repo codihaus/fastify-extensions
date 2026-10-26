@@ -1,0 +1,52 @@
+:root {
+	--fg: #1f2328;
+	--muted: #59636e;
+	--accent: #0969da;
+	--line: #d1d9e0;
+}
+
+body {
+	margin: 0;
+	font: 16px/1.5 system-ui, sans-serif;
+	color: var(--fg);
+}
+
+header,
+main,
+footer {
+	max-width: 960px;
+	margin: 0 auto;
+	padding: 16px;
+}
+
+header {
+	display: flex;
+	gap: 16px;
+	align-items: center;
+	border-bottom: 1px solid var(--line);
+}
+
+header strong {
+	margin-right: auto;
+}
+
+a {
+	color: var(--accent);
+}
+
+table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+th,
+td {
+	padding: 8px;
+	text-align: left;
+	border-bottom: 1px solid var(--line);
+}
+
+footer {
+	color: var(--muted);
+	font-size: 14px;
+}

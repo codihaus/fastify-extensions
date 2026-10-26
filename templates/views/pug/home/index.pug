@@ -1,0 +1,24 @@
+extends ../layouts/base
+
+block content
+  h1= appName
+  p
+    | Edit
+    |
+    code src/controllers/home.controller.ts
+    |  and
+    |
+    code views/home/index.pug
+    | .
+  h2 Latest products
+  ul
+    each product in products
+      li #{product.name} — #{product.price}
+  p
+    a(href="/api/products") JSON API
+    |  ·
+    |
+    a(href="/reports/summary") Report (extension)
+    |  ·
+    |
+    a(href="/health/ready") Health
